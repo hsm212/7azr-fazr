@@ -39,9 +39,17 @@ export function useGame(roomId: string) {
   useEffect(() => {
     if (!roomId) return
     setLoading(true)
+
+    // Safety timeout — if Firestore doesn't respond in 8s, show an error
+    const timeout = setTimeout(() => {
+      setLoading(false)
+      setError('تعذر الاتصال بـ Firebase — تحقق من إعدادات المشروع')
+    }, 8000)
+
     const unsub = onSnapshot(
       doc(getDb(), 'games', roomId),
       (snap) => {
+        clearTimeout(timeout)
         if (snap.exists()) {
           setGame(snap.data() as GameState)
           setError(null)
@@ -51,11 +59,12 @@ export function useGame(roomId: string) {
         setLoading(false)
       },
       (err) => {
+        clearTimeout(timeout)
         setError(err.message)
         setLoading(false)
       },
     )
-    return unsub
+    return () => { unsub(); clearTimeout(timeout) }
   }, [roomId])
 
   const patch = useCallback(
@@ -138,13 +147,31 @@ export function useGame(roomId: string) {
 }
 
 export async function fetchQuestions(categoryId: string): Promise<Question[]> {
-  const snap = await getDocs(collection(getDb(), 'questions', categoryId, 'items'))
-  const all  = snap.docs.map(d => ({ id: d.id, ...d.data() } as Question))
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [all[i], all[j]] = [all[j], all[i]]
+  try {
+    const snap = await getDocs(collection(getDb(), 'questions', categoryId, 'items'))
+    const all  = snap.docs.map(d => ({ id: d.id, ...d.data() } as Question))
+
+    // If Firestore has enough questions, use them (shuffled)
+    if (all.length >= 6) {
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]]
+      }
+      return all.slice(0, 6)
+    }
+  } catch (e) {
+    console.warn('Firestore fetch failed, using local fallback:', e)
   }
-  return all.slice(0, 6)
+
+  // Fallback: use LOCAL_QB built into the app (always available, no Firestore needed)
+  const { LOCAL_QB } = await import('@/lib/categories')
+  const local = LOCAL_QB[categoryId] ?? []
+  const shuffled = [...local]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled.slice(0, 6).map(q => ({ q: q.q, a: q.a }))
 }
 
 export async function saveQuestion(categoryId: string, q: string, a: string): Promise<void> {
