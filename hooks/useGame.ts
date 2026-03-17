@@ -20,6 +20,7 @@ export async function createRoom(
     teamA:         { name: teamAName || 'فريق ألفا', score: 0 },
     teamB:         { name: teamBName || 'فريق بيتا', score: 0 },
     categories:    [],
+    questions:     {},
     answered:      {},
     turn:          'a',
     activeCard:    null,
