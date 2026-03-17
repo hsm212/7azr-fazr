@@ -1,41 +1,36 @@
-// ─── Core game state stored in Firestore ─────────────────────────────────────
-
 export type Team = {
   name:  string
   score: number
 }
 
 export type GamePhase = 'draft' | 'game' | 'ended'
-
-export type CardResult = 'a' | 'b' | 'x'   // x = canceled (no one answered)
+export type CardResult = 'a' | 'b' | 'x'
 
 export type GameState = {
   roomId:        string
   teamA:         Team
   teamB:         Team
-  categories:    string[]                        // 6 selected category IDs, in order
-  answered:      Record<string, CardResult>      // key = "col-row"
+  categories:    string[]
+  // Questions stored in Firestore so all devices see identical order
+  questions:     Record<string, { q: string; a: string }[]>
+  answered:      Record<string, CardResult>
   turn:          'a' | 'b'
-  activeCard:    string | null                   // "col-row" of open question
+  activeCard:    string | null
   phase:         GamePhase
   usedLifelines: { a: string[]; b: string[] }
-  isPit:         boolean                         // Pit lifeline armed
+  isPit:         boolean
   createdAt:     number
 }
 
-// ─── A single question entry ──────────────────────────────────────────────────
-
 export type Question = {
   id?: string
-  q:   string    // question text (Arabic)
-  a:   string    // answer text   (Arabic)
+  q:   string
+  a:   string
 }
-
-// ─── Category definition ──────────────────────────────────────────────────────
 
 export type Category = {
   id:    string
-  name:  string   // Arabic display name
+  name:  string
   emoji: string
-  desc:  string   // Arabic short description
+  desc:  string
 }
