@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title:       'سين جيم | Seen Jeem',
+  title:       'حزر فزر',
   description: 'لعبة مسابقات ثقافية للفرق',
 }
 
