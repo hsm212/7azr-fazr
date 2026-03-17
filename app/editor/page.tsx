@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'
 import { useState, useEffect } from 'react'
 import { ALL_CATS } from '@/lib/categories'
 import { fetchAllQuestions, saveQuestion, deleteQuestion } from '@/hooks/useGame'
