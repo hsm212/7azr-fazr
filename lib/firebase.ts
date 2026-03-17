@@ -15,9 +15,6 @@ function getApp(): FirebaseApp {
   return getApps().length ? getApps()[0] : initializeApp(getConfig())
 }
 
-// ── ALL services are lazy — nothing runs at import time ───────────────────────
-// This prevents Next.js build-time crashes when env vars are not available.
-
 let _db:   Firestore | null = null
 let _rtdb: Database  | null = null
 let _auth: Auth      | null = null
@@ -25,7 +22,7 @@ let _auth: Auth      | null = null
 export function getDb(): Firestore {
   if (!_db) {
     const { getFirestore } = require('firebase/firestore')
-    _db = getFirestore(getApp())
+    _db = getFirestore(getApp()) as Firestore
   }
   return _db!
 }
@@ -33,7 +30,7 @@ export function getDb(): Firestore {
 export function getRtdb(): Database {
   if (!_rtdb) {
     const { getDatabase } = require('firebase/database')
-    _rtdb = getDatabase(getApp())
+    _rtdb = getDatabase(getApp()) as Database
   }
   return _rtdb!
 }
@@ -41,11 +38,7 @@ export function getRtdb(): Database {
 export function getFirebaseAuth(): Auth {
   if (!_auth) {
     const { getAuth } = require('firebase/auth')
-    _auth = getAuth(getApp())
+    _auth = getAuth(getApp()) as Auth
   }
   return _auth!
 }
-
-// Legacy named exports so existing imports don't break
-export const db   = new Proxy({} as Firestore, { get: (_, p) => (getDb() as any)[p] })
-export const auth = new Proxy({} as Auth,      { get: (_, p) => (getFirebaseAuth() as any)[p] })
