@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Game rooms — anyone can read (players/spectators), anyone can write for now.
+    // Tighten this after you add Firebase Auth by checking request.auth != null.
+    match /games/{roomId} {
+      allow read:  if true;
+      allow write: if true;
+    }
+
+    // Question bank — anyone can read, only authenticated users can write.
+    // The /editor page signs in anonymously before writing.
+    match /questions/{catId}/items/{itemId} {
+      allow read:  if true;
+      allow write: if request.auth != null;
+    }
+  }
+}

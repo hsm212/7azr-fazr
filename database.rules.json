@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "timers": {
+      "$roomId": {
+        ".read":  true,
+        ".write": true
+      }
+    }
+  }
+}
