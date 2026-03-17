@@ -12,11 +12,11 @@ export type GameState = {
   teamA:            Team
   teamB:            Team
   categories:       string[]
-  questions:        Record<string, { q: string; a: string; difficulty: Difficulty }[]>
+  questions:        Record<string, { q: string; a: string; difficulty: Difficulty; imageUrl?: string }[]>
   answered:         Record<string, CardResult>
   turn:             'a' | 'b'
   activeCard:       string | null
-  activeCardAnswer: string | null   // set when answer is revealed to all
+  activeCardAnswer: string | null
   phase:            GamePhase
   usedLifelines:    { a: string[]; b: string[] }
   isPit:            boolean
@@ -28,12 +28,13 @@ export type Question = {
   q:          string
   a:          string
   difficulty: Difficulty
+  imageUrl?:  string
 }
 
 export type Category = {
-  id:       string
-  name:     string
-  emoji:    string
-  desc:     string
-  custom?:  boolean
+  id:      string
+  name:    string
+  emoji:   string
+  desc:    string
+  custom?: boolean
 }

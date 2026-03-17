@@ -16,7 +16,7 @@ export default function HostPage() {
 
   const [draftStep, setDraftStep]   = useState(0)
   const [allCats, setAllCats]       = useState<Category[]>(BUILT_IN_CATS)
-  const [activeQ, setActiveQ]       = useState<{ key: string; cid: string; row: number; pts: number; answer: string } | null>(null)
+  const [activeQ, setActiveQ]       = useState<{ key: string; cid: string; row: number; pts: number; answer: string; imageUrl?: string } | null>(null)
   const [answerVisible, setAnswerVisible] = useState(false)
   const [toast, setToast]           = useState('')
 
@@ -68,7 +68,7 @@ export default function HostPage() {
     const q   = game.questions[cid][row]
     const pts = DIFFICULTY_POINTS[q?.difficulty as keyof typeof DIFFICULTY_POINTS ?? 'medium']
     await openCard(key)
-    setActiveQ({ key, cid, row, pts, answer: q?.a ?? '' })
+    setActiveQ({ key, cid, row, pts, answer: q?.a ?? '', imageUrl: q?.imageUrl })
     setAnswerVisible(false)
     startTimer(game.turn)
   }
@@ -276,6 +276,15 @@ export default function HostPage() {
             <div style={{ fontSize:28, fontWeight:700, color:'#e8eaf6', lineHeight:1.9, paddingRight:18, borderRight:'4px solid #ffd60a' }}>
               {getQ(activeQ.cid, activeQ.row).q}
             </div>
+
+            {/* Question image */}
+            {activeQ.imageUrl && (
+              <div style={{ borderRadius:14, overflow:'hidden', maxHeight:260, background:'#0f1228', border:'1px solid #252b55' }}>
+                <img src={activeQ.imageUrl} alt=""
+                  style={{ width:'100%', maxHeight:260, objectFit:'contain', display:'block' }}
+                  onError={e => (e.currentTarget.parentElement!.style.display='none')} />
+              </div>
+            )}
 
             {/* Answer */}
             {answerVisible && (

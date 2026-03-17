@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   doc, onSnapshot, setDoc, updateDoc,
-  collection, addDoc, getDocs, deleteDoc, getDoc,
+  collection, addDoc, getDocs, deleteDoc,
 } from 'firebase/firestore'
 import { getDb } from '@/lib/firebase'
 import type { GameState, Question, Category, Difficulty } from '@/types/game'
@@ -40,7 +40,7 @@ export function useGame(roomId: string) {
     setLoading(true)
     const timeout = setTimeout(() => {
       setLoading(false)
-      setError('تعذر الاتصال بـ Firebase — تحقق من إعدادات المشروع')
+      setError('تعذر الاتصال بـ Firebase')
     }, 8000)
     const unsub = onSnapshot(
       doc(getDb(), 'games', roomId),
@@ -112,7 +112,6 @@ export function useGame(roomId: string) {
     [game, patch],
   )
 
-  // Reveal answer to all without closing the card
   const revealAnswer = useCallback(
     (answer: string) => patch({ activeCardAnswer: answer }),
     [patch],
@@ -151,7 +150,7 @@ export async function fetchQuestions(categoryId: string): Promise<Question[]> {
   } catch (e) {
     console.warn('Firestore fetch failed, using local fallback:', e)
   }
-  const local = (LOCAL_QB[categoryId] ?? []).map(q => ({ ...q }))
+  const local = (LOCAL_QB[categoryId] ?? []).map(q => ({ ...q, imageUrl: undefined }))
   for (let i = local.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [local[i], local[j]] = [local[j], local[i]]
@@ -159,12 +158,22 @@ export async function fetchQuestions(categoryId: string): Promise<Question[]> {
   return local.slice(0, 6)
 }
 
-export async function saveQuestion(categoryId: string, q: string, a: string, difficulty: Difficulty): Promise<void> {
-  await addDoc(collection(getDb(), 'questions', categoryId, 'items'), { q, a, difficulty })
+export async function saveQuestion(
+  categoryId: string, q: string, a: string,
+  difficulty: Difficulty, imageUrl?: string
+): Promise<void> {
+  const data: Record<string, unknown> = { q, a, difficulty }
+  if (imageUrl) data.imageUrl = imageUrl
+  await addDoc(collection(getDb(), 'questions', categoryId, 'items'), data)
 }
 
-export async function updateQuestion(categoryId: string, questionId: string, q: string, a: string, difficulty: Difficulty): Promise<void> {
-  await updateDoc(doc(getDb(), 'questions', categoryId, 'items', questionId), { q, a, difficulty })
+export async function updateQuestion(
+  categoryId: string, questionId: string,
+  q: string, a: string, difficulty: Difficulty, imageUrl?: string
+): Promise<void> {
+  const data: Record<string, unknown> = { q, a, difficulty }
+  if (imageUrl !== undefined) data.imageUrl = imageUrl
+  await updateDoc(doc(getDb(), 'questions', categoryId, 'items', questionId), data)
 }
 
 export async function deleteQuestion(categoryId: string, questionId: string): Promise<void> {
