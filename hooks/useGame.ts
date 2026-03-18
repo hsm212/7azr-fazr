@@ -137,25 +137,64 @@ export function useGame(roomId: string) {
 // ── Question bank ─────────────────────────────────────────────────────────────
 
 export async function fetchQuestions(categoryId: string): Promise<Question[]> {
+  let pool: Question[] = []
   try {
     const snap = await getDocs(collection(getDb(), 'questions', categoryId, 'items'))
     const all  = snap.docs.map(d => ({ id: d.id, ...d.data() } as Question))
-    if (all.length >= 6) {
-      for (let i = all.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [all[i], all[j]] = [all[j], all[i]]
-      }
-      return all.slice(0, 6)
-    }
+    if (all.length >= 6) pool = all
   } catch (e) {
     console.warn('Firestore fetch failed, using local fallback:', e)
   }
-  const local = (LOCAL_QB[categoryId] ?? []).map(q => ({ ...q, imageUrl: undefined }))
-  for (let i = local.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [local[i], local[j]] = [local[j], local[i]]
+  if (pool.length < 6) {
+    pool = (LOCAL_QB[categoryId] ?? []).map(q => ({ ...q }))
   }
-  return local.slice(0, 6)
+  return balancedSelect(pool)
+}
+
+/**
+ * Selects 6 questions with balanced difficulty:
+ * Target: 2 easy (100pts) + 2 medium (300pts) + 2 hard (500pts) = 1800pts
+ *
+ * Rules:
+ * - Always try to include 2 of each difficulty (if available)
+ * - If a difficulty tier is short, fill remaining slots with higher tiers first
+ *   (to maximise total points), then lower tiers as last resort
+ * - Total points: min 600, max 1800 — higher is better
+ */
+function balancedSelect(pool: Question[]): Question[] {
+  const shuffle = <T>(arr: T[]): T[] => {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]]
+    }
+    return a
+  }
+
+  const easy   = shuffle(pool.filter(q => (q.difficulty ?? 'easy') === 'easy'))
+  const medium = shuffle(pool.filter(q => q.difficulty === 'medium'))
+  const hard   = shuffle(pool.filter(q => q.difficulty === 'hard'))
+
+  const selected: Question[] = []
+
+  // Step 1 — take up to 2 from each tier
+  selected.push(...easy.slice(0, 2))
+  selected.push(...medium.slice(0, 2))
+  selected.push(...hard.slice(0, 2))
+
+  // Step 2 — if we still need more (< 6), fill with remaining questions
+  // Priority: hard first (maximise points), then medium, then easy
+  if (selected.length < 6) {
+    const used    = new Set(selected.map(q => q.id ?? q.q))
+    const remaining = shuffle([
+      ...hard.filter(q => !used.has(q.id ?? q.q)),
+      ...medium.filter(q => !used.has(q.id ?? q.q)),
+      ...easy.filter(q => !used.has(q.id ?? q.q)),
+    ])
+    selected.push(...remaining.slice(0, 6 - selected.length))
+  }
+
+  return selected
 }
 
 export async function saveQuestion(
