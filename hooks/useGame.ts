@@ -148,16 +148,24 @@ export async function fetchQuestions(categoryId: string): Promise<Question[]> {
   if (pool.length < 6) {
     pool = (LOCAL_QB[categoryId] ?? []).map(q => ({ ...q }))
   }
-  return balancedSelect(pool)
+  const selected = balancedSelect(pool)
+  // Fixed display order: 2 medium → 2 easy → 2 hard (rows 0-1, 2-3, 4-5)
+  const order: Record<string, number> = { easy: 0, medium: 1, hard: 2 }
+  selected.sort((a, b) => (order[a.difficulty ?? 'easy'] ?? 1) - (order[b.difficulty ?? 'easy'] ?? 1))
+  return selected
 }
 
 /**
  * Selects 6 questions with balanced difficulty.
  *
- * Rules:
- * - Minimum 2 of each available tier (easy/medium/hard)
- * - Total points: min 600, max 1800 — higher is better
- * - Fill remaining slots budget-aware: pick highest value that keeps total ≤ 1800
+ * Slot allocation depends on how many tiers have questions:
+ *   3 tiers available → 2 easy + 2 medium + 2 hard
+ *   2 tiers available → 3 + 3  (e.g. 3 easy + 3 hard if no medium)
+ *   1 tier available  → 6 of that tier
+ *
+ * Within each tier, questions are shuffled randomly.
+ * If a tier can't fill its allocated slots, remaining slots go to other tiers
+ * (hard first to maximise points, easy as last resort).
  */
 function balancedSelect(pool: Question[]): Question[] {
   const shuffle = <T>(arr: T[]): T[] => {
@@ -169,51 +177,37 @@ function balancedSelect(pool: Question[]): Question[] {
     return a
   }
 
-  const pts = (d: string) => d === 'hard' ? 500 : d === 'medium' ? 300 : 100
-
   const easy   = shuffle(pool.filter(q => (q.difficulty ?? 'easy') === 'easy'))
   const medium = shuffle(pool.filter(q => q.difficulty === 'medium'))
   const hard   = shuffle(pool.filter(q => q.difficulty === 'hard'))
 
+  // How many tiers actually have questions?
+  const tiers = [easy, medium, hard].filter(t => t.length > 0)
+  const slotsPerTier = tiers.length === 0 ? 0
+                     : tiers.length === 1 ? 6
+                     : tiers.length === 2 ? 3
+                     : 2  // 3 tiers → 2 each
+
+  // Allocate slots — each tier gets slotsPerTier (capped by availability)
+  const eSlots = Math.min(slotsPerTier, easy.length)
+  const mSlots = Math.min(slotsPerTier, medium.length)
+  const hSlots = Math.min(slotsPerTier, hard.length)
+
   const selected: Question[] = []
+  selected.push(...easy.slice(0, eSlots))
+  selected.push(...medium.slice(0, mSlots))
+  selected.push(...hard.slice(0, hSlots))
 
-  // Step 1 — guaranteed minimums: up to 2 from each tier
-  selected.push(...easy.slice(0, 2))
-  selected.push(...medium.slice(0, 2))
-  selected.push(...hard.slice(0, 2))
-
-  // Step 2 — fill remaining slots, budget-aware but always reach 6
+  // Fill any remaining slots (happens when a tier had fewer than its allocation)
+  // Priority: hard first (maximise points), then medium, then easy
   if (selected.length < 6) {
     const used = new Set(selected.map(q => q.id ?? q.q))
-    // Candidates ordered hard → medium → easy (maximise points)
-    const candidates = shuffle([
+    const extras = [
       ...hard.filter(q   => !used.has(q.id ?? q.q)),
       ...medium.filter(q => !used.has(q.id ?? q.q)),
       ...easy.filter(q   => !used.has(q.id ?? q.q)),
-    ])
-    // Also keep an easy-first ordering for the fallback
-    const cheapest = shuffle([
-      ...easy.filter(q   => !used.has(q.id ?? q.q)),
-      ...medium.filter(q => !used.has(q.id ?? q.q)),
-      ...hard.filter(q   => !used.has(q.id ?? q.q)),
-    ])
-    let total = selected.reduce((s, q) => s + pts(q.difficulty ?? 'easy'), 0)
-    while (selected.length < 6 && (candidates.length > 0 || cheapest.length > 0)) {
-      // Try to pick highest-value candidate that fits within budget
-      const fitIdx = candidates.findIndex(q => total + pts(q.difficulty ?? 'easy') <= 1800)
-      if (fitIdx !== -1) {
-        const q = candidates.splice(fitIdx, 1)[0]
-        cheapest.splice(cheapest.findIndex(c => (c.id ?? c.q) === (q.id ?? q.q)), 1)
-        selected.push(q)
-        total += pts(q.difficulty ?? 'easy')
-      } else if (cheapest.length > 0) {
-        // Nothing fits budget — take cheapest available to always reach 6
-        const q = cheapest.shift()!
-        candidates.splice(candidates.findIndex(c => (c.id ?? c.q) === (q.id ?? q.q)), 1)
-        selected.push(q)
-        total += pts(q.difficulty ?? 'easy')
-      } else break
-    }
+    ]
+    selected.push(...extras.slice(0, 6 - selected.length))
   }
 
   return selected
