@@ -149,7 +149,7 @@ export default function EditorPage() {
       setEditCatId(null)
       showToast('✓ تم تحديث الفئة')
     } catch (e: any) {
-      showToast(`فشل التحديث: ${e?.message ?? ''}`, 'err')
+      showToast(`⚠ فشل التحديث: ${e?.message ?? ''}`)
     }
     setCatEditSaving(false)
   }
