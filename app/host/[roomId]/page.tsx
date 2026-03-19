@@ -47,10 +47,9 @@ export default function HostPage() {
     load()
   }, [game?.phase, game?.categories?.join(',')])
 
-  // When timer expires → reveal answer, move to 'revealed' stage (overlay stays open)
+  // When timer expires → move to 'revealed' stage (overlay stays open, answer NOT auto-revealed)
   useEffect(() => {
     if (!timerState.expired || !activeQ) return
-    revealAnswer(activeQ.answer)
     setStage('revealed')
   }, [timerState.expired])
 
