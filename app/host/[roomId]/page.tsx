@@ -305,12 +305,10 @@ export default function HostPage() {
                   ✋ {activeTeamName} أجاب — فرصة {opponentTeamName}
                 </button>
                 {/* Reveal answer without triggering steal */}
-                {!game.activeCardAnswer && (
-                  <button onClick={handleReveal}
-                    style={{ flex:1, padding:'16px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:15, fontWeight:700, cursor:'pointer' }}>
-                    🔍 اكشف الإجابة
-                  </button>
-                )}
+                <button onClick={handleReveal}
+                  style={{ flex:1, padding:'16px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:15, fontWeight:700, cursor:'pointer' }}>
+                  🔍 اكشف الإجابة
+                </button>
                 <button onClick={handleNoAnswer}
                   style={{ padding:'16px 18px', borderRadius:12, background:'transparent', border:'1px solid #444', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:14, fontWeight:700, cursor:'pointer' }}>
                   لا إجابة
@@ -335,12 +333,10 @@ export default function HostPage() {
                     style={{ flex:1, padding:'14px', borderRadius:12, background:`rgba(${game.turn==='a'?'6,214,160':'230,57,70'},.12)`, border:`1px solid ${game.turn==='a'?'#06d6a0':'#e63946'}`, color:game.turn==='a'?'#06d6a0':'#e63946', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:900, cursor:'pointer' }}>
                     🔥 {opponentTeamName} سرق النقاط!
                   </button>
-                  {!game.activeCardAnswer && (
-                    <button onClick={handleReveal}
-                      style={{ padding:'14px 14px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-                      🔍 اكشف
-                    </button>
-                  )}
+                  <button onClick={handleReveal}
+                    style={{ padding:'14px 14px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                    🔍 اكشف
+                  </button>
                   <button onClick={handleNoAnswer}
                     style={{ padding:'14px 14px', borderRadius:12, background:'transparent', border:'1px solid #444', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:13, fontWeight:700, cursor:'pointer' }}>
                     لا إجابة
