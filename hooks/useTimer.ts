@@ -23,63 +23,77 @@ export function useTimer(roomId: string, isHost: boolean) {
     running: false, mainTeam: 'a', expired: false,
   })
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const stateRef    = useRef(state)
+  stateRef.current  = state
 
+  // All devices subscribe to timer state
   useEffect(() => {
     if (!roomId) return
     const timerRef = ref(getRtdb(), `timers/${roomId}`)
-    const unsub = onValue(timerRef, (snap) => {
+    const unsub = onValue(timerRef, snap => {
       if (snap.exists()) setState(snap.val() as TimerState)
     })
     return unsub
   }, [roomId])
 
-  const tick = useCallback((current: TimerState) => {
-    if (!isHost) return current
-    const timerRef = ref(getRtdb(), `timers/${roomId}`)
-    const next = { ...current, secs: current.secs - 1 }
-    if (next.secs < 0) {
-      if (next.phase === 1) {
-        const p2: TimerState = { ...next, phase: 2, secs: PHASE2_SECS, max: PHASE2_SECS, expired: false }
-        set(timerRef, p2); setState(p2); return p2
-      } else {
-        const exp: TimerState = { ...next, secs: 0, running: false, expired: true }
-        set(timerRef, exp); setState(exp)
-        if (intervalRef.current) clearInterval(intervalRef.current)
-        return exp
-      }
-    }
-    set(timerRef, next); setState(next); return next
-  }, [isHost, roomId])
+  const writeState = useCallback((s: TimerState) => {
+    set(ref(getRtdb(), `timers/${roomId}`), s)
+    setState(s)
+  }, [roomId])
 
+  const clearTick = () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+
+  // Host-only: tick
+  const startTick = useCallback((initial: TimerState) => {
+    clearTick()
+    let current = initial
+    intervalRef.current = setInterval(() => {
+      const next = { ...current, secs: current.secs - 1 }
+      if (next.secs < 0) {
+        // Phase 1 expired — DO NOT auto-transition; host handles it manually
+        // Phase 2 expired — mark expired
+        const expired: TimerState = { ...current, secs: 0, running: false, expired: true }
+        writeState(expired)
+        clearTick()
+        return
+      }
+      writeState(next)
+      current = next
+    }, 1000)
+  }, [writeState])
+
+  // Start phase 1 (60s for active team)
   const startTimer = useCallback((mainTeam: 'a' | 'b') => {
     if (!isHost) return
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    const timerRef = ref(getRtdb(), `timers/${roomId}`)
+    clearTick()
     const initial: TimerState = {
       phase: 1, secs: PHASE1_SECS, max: PHASE1_SECS,
       running: true, mainTeam, expired: false,
     }
-    set(timerRef, initial); setState(initial)
-    let current = initial
-    intervalRef.current = setInterval(() => {
-      current = tick(current) ?? current
-      if (!current.running || current.expired) {
-        if (intervalRef.current) clearInterval(intervalRef.current)
-      }
-    }, 1000)
-  }, [isHost, tick, roomId])
+    writeState(initial)
+    startTick(initial)
+  }, [isHost, writeState, startTick])
+
+  // Manually jump to phase 2 (30s for opponent) — triggered by host clicking "answered"
+  const startPhase2 = useCallback((mainTeam: 'a' | 'b') => {
+    if (!isHost) return
+    clearTick()
+    const p2: TimerState = {
+      phase: 2, secs: PHASE2_SECS, max: PHASE2_SECS,
+      running: true, mainTeam, expired: false,
+    }
+    writeState(p2)
+    startTick(p2)
+  }, [isHost, writeState, startTick])
 
   const stopTimer = useCallback(() => {
     if (!isHost) return
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    setState(prev => {
-      const stopped = { ...prev, running: false }
-      set(ref(getRtdb(), `timers/${roomId}`), stopped)
-      return stopped
-    })
-  }, [isHost, roomId])
+    clearTick()
+    const stopped = { ...stateRef.current, running: false }
+    writeState(stopped)
+  }, [isHost, writeState])
 
-  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
+  useEffect(() => () => clearTick(), [])
 
-  return { timerState: state, startTimer, stopTimer }
+  return { timerState: state, startTimer, startPhase2, stopTimer }
 }

@@ -9,18 +9,25 @@ import type { Category } from '@/types/game'
 
 const DRAFT_ORDER = ['a','b','b','a','a','b'] as const
 
+// Overlay has 3 stages:
+//  'asking'   — 60s for active team, host sees "Team answered" button
+//  'stealing' — 30s for opponent to steal
+//  'revealed' — timer expired OR host revealed; award / "لا إجابة" visible
+type OverlayStage = 'asking' | 'stealing' | 'revealed'
+
 export default function HostPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const { game, loading, error, setCategories, openCard, awardPoints, cancelCard, revealAnswer, patch } = useGame(roomId)
-  const { timerState, startTimer, stopTimer } = useTimer(roomId, true)
+  const { timerState, startTimer, startPhase2, stopTimer } = useTimer(roomId, true)
 
-  const [draftStep, setDraftStep]   = useState(0)
-  const [allCats, setAllCats]       = useState<Category[]>(BUILT_IN_CATS)
-  const [activeQ, setActiveQ]       = useState<{ key: string; cid: string; row: number; pts: number; answer: string; imageUrl?: string } | null>(null)
-  const [answerVisible, setAnswerVisible] = useState(false)
-  const [toast, setToast]           = useState('')
+  const [draftStep, setDraftStep] = useState(0)
+  const [allCats, setAllCats]     = useState<Category[]>(BUILT_IN_CATS)
+  const [activeQ, setActiveQ]     = useState<{
+    key: string; cid: string; row: number; pts: number; answer: string; imageUrl?: string
+  } | null>(null)
+  const [stage, setStage]         = useState<OverlayStage>('asking')
+  const [toast, setToast]         = useState('')
 
-  // Load all categories (built-in + custom)
   useEffect(() => {
     fetchAllCategories().then(setAllCats).catch(() => setAllCats(BUILT_IN_CATS))
   }, [])
@@ -40,14 +47,11 @@ export default function HostPage() {
     load()
   }, [game?.phase, game?.categories?.join(',')])
 
-  // Auto-cancel when timer expires — reveal answer to all
+  // When timer expires → reveal answer, move to 'revealed' stage (overlay stays open)
   useEffect(() => {
     if (!timerState.expired || !activeQ) return
-    const ans = game?.questions?.[activeQ.cid]?.[activeQ.row]?.a ?? ''
-    cancelCard(activeQ.key, ans)
-    setActiveQ(null)
-    setAnswerVisible(false)
-    showToast('⏰ انتهى الوقت — تم إلغاء السؤال')
+    revealAnswer(activeQ.answer)
+    setStage('revealed')
   }, [timerState.expired])
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000) }
@@ -58,8 +62,7 @@ export default function HostPage() {
 
   const pickCat = async (catId: string) => {
     if (!game || draftStep >= 6 || game.categories.includes(catId)) return
-    const newPicks = [...game.categories, catId]
-    await setCategories(newPicks)
+    await setCategories([...game.categories, catId])
     setDraftStep(s => s + 1)
   }
 
@@ -69,32 +72,45 @@ export default function HostPage() {
     const pts = DIFFICULTY_POINTS[q?.difficulty as keyof typeof DIFFICULTY_POINTS ?? 'medium']
     await openCard(key)
     setActiveQ({ key, cid, row, pts, answer: q?.a ?? '', imageUrl: q?.imageUrl })
-    setAnswerVisible(false)
+    setStage('asking')
     startTimer(game.turn)
   }
 
-  const handleReveal = async () => {
-    if (!activeQ) return
-    setAnswerVisible(true)
-    await revealAnswer(activeQ.answer)
+  // Host confirms active team answered → start 30s steal timer for opponent
+  const handleTeamAnswered = () => {
+    if (!activeQ || !game) return
+    const opponent = game.turn === 'a' ? 'b' : 'a'
+    startPhase2(opponent === 'a' ? 'b' : 'a') // mainTeam is the one who answered
+    setStage('stealing')
   }
 
+  // Reveal answer to all without closing
+  const handleReveal = async () => {
+    if (!activeQ) return
+    await revealAnswer(activeQ.answer)
+    setStage('revealed')
+  }
+
+  // Award points and close
   const handleAward = async (team: 'a' | 'b') => {
     if (!activeQ) return
     stopTimer()
     await awardPoints(team, activeQ.key, activeQ.pts, activeQ.answer)
-    showToast(`+${activeQ.pts} نقطة ← فريق ${team === 'a' ? game?.teamA.name : game?.teamB.name}`)
+    showToast(`+${activeQ.pts} نقطة ← ${team === 'a' ? game?.teamA.name : game?.teamB.name}`)
     setActiveQ(null)
-    setAnswerVisible(false)
   }
 
-  const handleSkip = async () => {
+  // No answer — reveal then close
+  const handleNoAnswer = async () => {
     if (!activeQ) return
     stopTimer()
-    await cancelCard(activeQ.key, activeQ.answer)
-    setActiveQ(null)
-    setAnswerVisible(false)
-    showToast('تم تخطي السؤال')
+    await revealAnswer(activeQ.answer)
+    // Small delay so guests see the answer before closing
+    setTimeout(async () => {
+      await cancelCard(activeQ.key, activeQ.answer)
+      setActiveQ(null)
+    }, 1500)
+    showToast('لا إجابة — تم الكشف عن الجواب')
   }
 
   if (loading) return <Screen><p style={{ color:'#6b74b8', fontSize:20, fontWeight:700 }}>جاري التحميل…</p></Screen>
@@ -104,10 +120,13 @@ export default function HostPage() {
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/game/${roomId}` : ''
   const questionsReady = game.questions && Object.keys(game.questions).length === 6
 
+  const activeTeamName    = game.turn === 'a' ? game.teamA.name : game.teamB.name
+  const opponentTeamName  = game.turn === 'a' ? game.teamB.name : game.teamA.name
+
   return (
     <div style={{ background:'#080a10', fontFamily:'Tajawal, sans-serif', height:'100vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <header style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 18px', background:'rgba(8,10,16,.95)', borderBottom:'1px solid #252b55', flexShrink:0 }}>
         <div style={{ fontSize:22, fontWeight:900, background:'linear-gradient(90deg,#e63946,#ffd60a,#06d6a0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
           حزر فزر — المضيف
@@ -128,7 +147,7 @@ export default function HostPage() {
         </div>
       </header>
 
-      {/* DRAFT */}
+      {/* ── Draft ── */}
       {game.phase === 'draft' && (
         <div style={{ flex:1, overflowY:'auto', padding:'16px 20px', maxWidth:900, width:'100%', margin:'0 auto' }}>
           <div style={{ textAlign:'center', marginBottom:16, padding:'10px 24px', borderRadius:14, fontWeight:700, fontSize:16,
@@ -141,19 +160,13 @@ export default function HostPage() {
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))', gap:10 }}>
             {allCats.map(cat => {
-              const idx = game.categories.indexOf(cat.id)
+              const idx    = game.categories.indexOf(cat.id)
               const picked = idx !== -1
-              const team = picked ? DRAFT_ORDER[idx] : null
+              const team   = picked ? DRAFT_ORDER[idx] : null
               return (
                 <button key={cat.id} onClick={() => !picked && draftStep < 6 && pickCat(cat.id)}
                   disabled={picked || draftStep >= 6}
-                  style={{
-                    background: team==='a'?'rgba(230,57,70,.1)':team==='b'?'rgba(6,214,160,.07)':'#10132a',
-                    border: team==='a'?'1px solid #e63946':team==='b'?'1px solid #06d6a0':'1px solid #252b55',
-                    borderRadius:12, padding:'12px 10px', textAlign:'right', cursor: picked||draftStep>=6?'default':'pointer',
-                    opacity: picked||draftStep>=6?0.7:1, fontFamily:'Tajawal, sans-serif',
-                    transition:'all .2s',
-                  }}>
+                  style={{ background:team==='a'?'rgba(230,57,70,.1)':team==='b'?'rgba(6,214,160,.07)':'#10132a', border:team==='a'?'1px solid #e63946':team==='b'?'1px solid #06d6a0':'1px solid #252b55', borderRadius:12, padding:'12px 10px', textAlign:'right', cursor:picked||draftStep>=6?'default':'pointer', opacity:picked||draftStep>=6?0.7:1, fontFamily:'Tajawal, sans-serif', transition:'all .2s' }}>
                   <div style={{ fontSize:22, marginBottom:6 }}>{cat.emoji}</div>
                   <div style={{ fontSize:14, fontWeight:700, color:'#e8eaf6' }}>{cat.name}</div>
                   {cat.custom && <div style={{ fontSize:10, color:'#6b74b8', marginTop:2 }}>مخصص</div>}
@@ -165,7 +178,7 @@ export default function HostPage() {
         </div>
       )}
 
-      {/* GAME — full viewport grid */}
+      {/* ── Game board ── */}
       {game.phase === 'game' && (
         <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'8px 12px', gap:6, minHeight:0 }}>
           {!questionsReady && (
@@ -178,22 +191,16 @@ export default function HostPage() {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:5, flexShrink:0 }}>
             {game.categories.map((cid: string, i: number) => {
               const cat = allCats.find(c => c.id === cid) ?? BUILT_IN_CATS.find(c=>c.id===cid)
-              const t = i < 3 ? 'a' : 'b'
+              const t   = i < 3 ? 'a' : 'b'
               return (
-                <div key={cid} style={{
-                  background: t==='a'?'rgba(230,57,70,.06)':'rgba(6,214,160,.04)',
-                  border:'1px solid #252b55', borderTop:`2px solid ${t==='a'?'#e63946':'#06d6a0'}`,
-                  borderRadius:8, padding:'6px 4px', textAlign:'center',
-                  fontSize:12, fontWeight:700, color:t==='a'?'#e63946':'#06d6a0',
-                  whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
-                }}>
+                <div key={cid} style={{ background:t==='a'?'rgba(230,57,70,.06)':'rgba(6,214,160,.04)', border:'1px solid #252b55', borderTop:`2px solid ${t==='a'?'#e63946':'#06d6a0'}`, borderRadius:8, padding:'6px 4px', textAlign:'center', fontSize:12, fontWeight:700, color:t==='a'?'#e63946':'#06d6a0', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                   {cat?.emoji} {cat?.name}
                 </div>
               )
             })}
           </div>
 
-          {/* Question grid — fills remaining height */}
+          {/* Question grid */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gridTemplateRows:'repeat(6,1fr)', gap:5, flex:1, minHeight:0 }}>
             {Array.from({ length: 6 }, (_, row) =>
               game.categories.map((cid: string, col: number) => {
@@ -203,29 +210,25 @@ export default function HostPage() {
                 const diff   = q?.difficulty ?? 'medium'
                 const pts    = DIFFICULTY_POINTS[diff as keyof typeof DIFFICULTY_POINTS]
                 const isOpen = activeQ?.key === key
+                const teamName = result === 'a' ? game.teamA.name : result === 'b' ? game.teamB.name : null
                 return (
                   <button key={key} onClick={() => questionsReady && !result && handleCardClick(key, cid, row)}
-                    style={{
-                      background: result==='a'?'rgba(230,57,70,.2)':result==='b'?'rgba(6,214,160,.15)':result==='x'?'rgba(60,60,80,.3)':isOpen?'rgba(255,214,10,.15)':'#181c3a',
-                      border: result==='a'?'2px solid #e63946':result==='b'?'2px solid #06d6a0':result==='x'?'1px solid #444':isOpen?'2px solid #ffd60a':'1px solid #252b55',
-                      borderRadius:10, cursor:result||!questionsReady?'default':'pointer',
-                      opacity:result==='x'?0.4:1, display:'flex', flexDirection:'column',
-                      alignItems:'center', justifyContent:'center', gap:2, padding:4, minHeight:0,
-                    }}>
+                    style={{ background:result==='a'?'rgba(230,57,70,.2)':result==='b'?'rgba(6,214,160,.15)':result==='x'?'rgba(60,60,80,.3)':isOpen?'rgba(255,214,10,.15)':'#181c3a', border:result==='a'?'2px solid #e63946':result==='b'?'2px solid #06d6a0':result==='x'?'1px solid #444':isOpen?'2px solid #ffd60a':'1px solid #252b55', borderRadius:10, cursor:result||!questionsReady?'default':'pointer', opacity:result==='x'?0.4:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:4, minHeight:0, overflow:'hidden' }}>
                     {!result && (
                       <>
                         <span style={{ fontSize:16, fontWeight:900, color:'#ffd60a', lineHeight:1 }}>{pts}</span>
-                        <span style={{ fontSize:10, fontWeight:700, color: DIFFICULTY_COLOR[diff as keyof typeof DIFFICULTY_COLOR] }}>
+                        <span style={{ fontSize:10, fontWeight:700, color:DIFFICULTY_COLOR[diff as keyof typeof DIFFICULTY_COLOR] }}>
                           {DIFFICULTY_LABEL[diff as keyof typeof DIFFICULTY_LABEL]}
                         </span>
                       </>
                     )}
-                    {result && result !== 'x' && (
-                      <span style={{ fontSize:13, fontWeight:900, color:result==='a'?'#e63946':'#06d6a0' }}>
-                        {result==='a'?game.teamA.name.slice(0,4):game.teamB.name.slice(0,4)}
+                    {/* ── Fix: full team name, scaled to fit, no truncation ── */}
+                    {teamName && (
+                      <span style={{ fontSize:11, fontWeight:900, color:result==='a'?'#e63946':'#06d6a0', textAlign:'center', wordBreak:'break-word', lineHeight:1.2, padding:'0 2px' }}>
+                        {teamName}
                       </span>
                     )}
-                    {result === 'x' && <span style={{ color:'#555', fontSize:18 }}>—</span>}
+                    {result === 'x' && <span style={{ color:'#555', fontSize:16 }}>—</span>}
                   </button>
                 )
               })
@@ -234,29 +237,31 @@ export default function HostPage() {
         </div>
       )}
 
-      {/* FULL-SCREEN QUESTION OVERLAY */}
+      {/* ── Full-screen question overlay ── */}
       {activeQ && game.phase === 'game' && (
-        <div style={{ position:'fixed', inset:0, zIndex:100, background:'rgba(0,0,0,.95)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, backdropFilter:'blur(8px)' }}>
+        <div style={{ position:'fixed', inset:0, zIndex:100, background:'rgba(0,0,0,.95)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, backdropFilter:'blur(8px)', overflowY:'auto' }}>
           <div style={{ width:'100%', maxWidth:700, display:'flex', flexDirection:'column', gap:16 }}>
 
             {/* Timer */}
             <div style={{ background:'#10132a', border:'1px solid #252b55', borderRadius:14, padding:'12px 18px' }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
                 <span style={{ fontSize:15, fontWeight:700, color:timerState.phase===1?'#ffd60a':'#9099d0' }}>
-                  {timerState.phase===1
-                    ? `دور ${timerState.mainTeam==='a'?game.teamA.name:game.teamB.name} — ٦٠ث`
-                    : `فرصة ${timerState.mainTeam==='a'?game.teamB.name:game.teamA.name} — ٣٠ث`}
+                  {stage === 'asking'
+                    ? `دور ${activeTeamName} — ٦٠ث`
+                    : stage === 'stealing'
+                    ? `فرصة سرقة ${opponentTeamName} — ٣٠ث`
+                    : 'انتهى الوقت'}
                 </span>
                 <span style={{ fontSize:40, fontWeight:900, color:timerState.secs<=10?'#e63946':'#ffd60a', fontVariantNumeric:'tabular-nums' }}>
                   {Math.max(0, timerState.secs)}
                 </span>
               </div>
               <div style={{ height:6, background:'#1f244a', borderRadius:3, overflow:'hidden' }}>
-                <div style={{ width:`${Math.max(0,timerState.secs/timerState.max*100)}%`, height:'100%', borderRadius:3, transition:'width .95s linear', background:timerState.secs<=10?'#e63946':timerState.phase===1?'#ffd60a':'#9099d0' }} />
+                <div style={{ width:`${Math.max(0,timerState.secs/timerState.max*100)}%`, height:'100%', borderRadius:3, transition:'width .95s linear', background:timerState.secs<=10?'#e63946':stage==='asking'?'#ffd60a':'#9099d0' }} />
               </div>
               <div style={{ display:'flex', gap:8, marginTop:6 }}>
-                <div style={{ flex:1, height:3, borderRadius:2, background:timerState.phase===1?'#ffd60a':'#303870' }} />
-                <div style={{ flex:1, height:3, borderRadius:2, background:timerState.phase===2?'#ffd60a':'#1f244a' }} />
+                <div style={{ flex:1, height:3, borderRadius:2, background:stage==='asking'?'#ffd60a':'#303870' }} />
+                <div style={{ flex:1, height:3, borderRadius:2, background:stage==='stealing'?'#ffd60a':'#1f244a' }} />
               </div>
             </div>
 
@@ -265,10 +270,10 @@ export default function HostPage() {
               <span style={{ fontSize:52, fontWeight:900, color:'#ffd60a', lineHeight:1 }}>{activeQ.pts}</span>
               <span style={{ fontSize:18, color:'#6b74b8' }}>نقطة</span>
               <span style={{ fontSize:15, fontWeight:700, padding:'4px 14px', borderRadius:20,
-                color: DIFFICULTY_COLOR[getQ(activeQ.cid, activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR],
-                background: `${DIFFICULTY_COLOR[getQ(activeQ.cid, activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR]}22`,
-                border: `1px solid ${DIFFICULTY_COLOR[getQ(activeQ.cid, activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR]}` }}>
-                {DIFFICULTY_LABEL[getQ(activeQ.cid, activeQ.row).difficulty as keyof typeof DIFFICULTY_LABEL]}
+                color:DIFFICULTY_COLOR[getQ(activeQ.cid,activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR],
+                background:`${DIFFICULTY_COLOR[getQ(activeQ.cid,activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR]}22`,
+                border:`1px solid ${DIFFICULTY_COLOR[getQ(activeQ.cid,activeQ.row).difficulty as keyof typeof DIFFICULTY_COLOR]}` }}>
+                {DIFFICULTY_LABEL[getQ(activeQ.cid,activeQ.row).difficulty as keyof typeof DIFFICULTY_LABEL]}
               </span>
             </div>
 
@@ -277,48 +282,96 @@ export default function HostPage() {
               {getQ(activeQ.cid, activeQ.row).q}
             </div>
 
-            {/* Question image */}
+            {/* Image */}
             {activeQ.imageUrl && (
               <div style={{ borderRadius:14, overflow:'hidden', maxHeight:260, background:'#0f1228', border:'1px solid #252b55' }}>
-                <img src={activeQ.imageUrl} alt=""
-                  style={{ width:'100%', maxHeight:260, objectFit:'contain', display:'block' }}
+                <img src={activeQ.imageUrl} alt="" style={{ width:'100%', maxHeight:260, objectFit:'contain', display:'block' }}
                   onError={e => (e.currentTarget.parentElement!.style.display='none')} />
               </div>
             )}
 
-            {/* Answer */}
-            {answerVisible && (
-              <div style={{ background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.35)', borderRadius:12, padding:'14px 18px', fontSize:22, fontWeight:700, color:'#ffd60a' }}>
-                ✓ {activeQ.answer}
+            {/* Answer — shown once revealed */}
+            {game.activeCardAnswer && (
+              <div style={{ background:'rgba(255,214,10,.08)', border:'2px solid rgba(255,214,10,.4)', borderRadius:12, padding:'14px 18px', fontSize:22, fontWeight:700, color:'#ffd60a' }}>
+                ✓ {game.activeCardAnswer}
               </div>
             )}
-            {!answerVisible && (
-              <button onClick={handleReveal}
-                style={{ padding:'12px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:700, cursor:'pointer' }}>
-                🔍 اكشف الإجابة للجميع
-              </button>
+
+            {/* ── Stage: ASKING — active team's 60s ── */}
+            {stage === 'asking' && (
+              <div style={{ display:'flex', gap:10 }}>
+                {/* "Team answered" → start steal timer */}
+                <button onClick={handleTeamAnswered}
+                  style={{ flex:2, padding:'16px', borderRadius:12, background:`rgba(${game.turn==='a'?'230,57,70':'6,214,160'},.15)`, border:`2px solid ${game.turn==='a'?'#e63946':'#06d6a0'}`, color:game.turn==='a'?'#e63946':'#06d6a0', fontFamily:'Tajawal, sans-serif', fontSize:18, fontWeight:900, cursor:'pointer' }}>
+                  ✋ {activeTeamName} أجاب — فرصة {opponentTeamName}
+                </button>
+                {/* Reveal answer without triggering steal */}
+                {!game.activeCardAnswer && (
+                  <button onClick={handleReveal}
+                    style={{ flex:1, padding:'16px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:15, fontWeight:700, cursor:'pointer' }}>
+                    🔍 اكشف الإجابة
+                  </button>
+                )}
+                <button onClick={handleNoAnswer}
+                  style={{ padding:'16px 18px', borderRadius:12, background:'transparent', border:'1px solid #444', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:14, fontWeight:700, cursor:'pointer' }}>
+                  لا إجابة
+                </button>
+              </div>
             )}
 
-            {/* Award buttons */}
-            <div style={{ display:'flex', gap:10 }}>
-              <button onClick={() => handleAward('a')}
-                style={{ flex:1, padding:'14px', borderRadius:12, background:'rgba(230,57,70,.12)', border:'1px solid #e63946', color:'#e63946', fontFamily:'Tajawal, sans-serif', fontSize:17, fontWeight:900, cursor:'pointer' }}>
-                ✔ {game.teamA.name} أجاب صح
-              </button>
-              <button onClick={() => handleAward('b')}
-                style={{ flex:1, padding:'14px', borderRadius:12, background:'rgba(6,214,160,.08)', border:'1px solid #06d6a0', color:'#06d6a0', fontFamily:'Tajawal, sans-serif', fontSize:17, fontWeight:900, cursor:'pointer' }}>
-                ✔ {game.teamB.name} أجاب صح
-              </button>
-              <button onClick={handleSkip}
-                style={{ padding:'14px 18px', borderRadius:12, background:'transparent', border:'1px solid #252b55', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:15, fontWeight:700, cursor:'pointer' }}>
-                تخطي
-              </button>
-            </div>
+            {/* ── Stage: STEALING — opponent's 30s ── */}
+            {stage === 'stealing' && (
+              <div style={{ display:'flex', gap:10, flexDirection:'column' }}>
+                <div style={{ textAlign:'center', padding:'10px', borderRadius:10, background:'rgba(255,214,10,.06)', border:'1px solid rgba(255,214,10,.2)', color:'#ffd60a', fontSize:14, fontWeight:700 }}>
+                  فرصة السرقة — {opponentTeamName} لديهم ٣٠ ثانية
+                </div>
+                <div style={{ display:'flex', gap:10 }}>
+                  {/* Award active team (answered correctly in phase 1) */}
+                  <button onClick={() => handleAward(game.turn)}
+                    style={{ flex:1, padding:'14px', borderRadius:12, background:`rgba(${game.turn==='a'?'230,57,70':'6,214,160'},.12)`, border:`1px solid ${game.turn==='a'?'#e63946':'#06d6a0'}`, color:game.turn==='a'?'#e63946':'#06d6a0', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:900, cursor:'pointer' }}>
+                    ✔ {activeTeamName} أجاب صح
+                  </button>
+                  {/* Award opponent (stole it) */}
+                  <button onClick={() => handleAward(game.turn === 'a' ? 'b' : 'a')}
+                    style={{ flex:1, padding:'14px', borderRadius:12, background:`rgba(${game.turn==='a'?'6,214,160':'230,57,70'},.12)`, border:`1px solid ${game.turn==='a'?'#06d6a0':'#e63946'}`, color:game.turn==='a'?'#06d6a0':'#e63946', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:900, cursor:'pointer' }}>
+                    🔥 {opponentTeamName} سرق النقاط!
+                  </button>
+                  {!game.activeCardAnswer && (
+                    <button onClick={handleReveal}
+                      style={{ padding:'14px 14px', borderRadius:12, background:'rgba(255,214,10,.08)', border:'1px solid rgba(255,214,10,.28)', color:'#ffd60a', fontFamily:'Tajawal, sans-serif', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                      🔍 اكشف
+                    </button>
+                  )}
+                  <button onClick={handleNoAnswer}
+                    style={{ padding:'14px 14px', borderRadius:12, background:'transparent', border:'1px solid #444', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                    لا إجابة
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Stage: REVEALED — timer expired, answer shown ── */}
+            {stage === 'revealed' && (
+              <div style={{ display:'flex', gap:10 }}>
+                <button onClick={() => handleAward('a')}
+                  style={{ flex:1, padding:'14px', borderRadius:12, background:'rgba(230,57,70,.12)', border:'1px solid #e63946', color:'#e63946', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:900, cursor:'pointer' }}>
+                  ✔ {game.teamA.name} أجاب صح
+                </button>
+                <button onClick={() => handleAward('b')}
+                  style={{ flex:1, padding:'14px', borderRadius:12, background:'rgba(6,214,160,.08)', border:'1px solid #06d6a0', color:'#06d6a0', fontFamily:'Tajawal, sans-serif', fontSize:16, fontWeight:900, cursor:'pointer' }}>
+                  ✔ {game.teamB.name} أجاب صح
+                </button>
+                <button onClick={handleNoAnswer}
+                  style={{ padding:'14px 18px', borderRadius:12, background:'transparent', border:'1px solid #444', color:'#6b74b8', fontFamily:'Tajawal, sans-serif', fontSize:14, fontWeight:700, cursor:'pointer' }}>
+                  لا إجابة
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ENDED */}
+      {/* ── Ended ── */}
       {game.phase === 'ended' && (
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center' }}>
           <div style={{ textAlign:'center' }}>
