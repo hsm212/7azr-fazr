@@ -144,7 +144,8 @@ export default function EditorPage() {
         emoji: editCatForm.emoji.trim(),
         desc: editCatForm.desc.trim(),
       })
-      await loadCustomCats()
+      const custom = await fetchCustomCategories()
+      setAllCats([...BUILT_IN_CATS, ...custom])
       setEditCatId(null)
       showToast('✓ تم تحديث الفئة')
     } catch (e: any) {
