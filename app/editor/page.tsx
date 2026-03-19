@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { BUILT_IN_CATS, DIFFICULTY_LABEL, DIFFICULTY_COLOR } from '@/lib/categories'
 import {
   fetchAllQuestions, saveQuestion, updateQuestion, deleteQuestion,
-  saveCustomCategory, fetchCustomCategories, deleteCustomCategory,
+  saveCustomCategory, updateCustomCategory, fetchCustomCategories, deleteCustomCategory,
 } from '@/hooks/useGame'
 import type { Question, Category, Difficulty } from '@/types/game'
 
@@ -35,6 +35,9 @@ export default function EditorPage() {
   const [saving,    setSaving]    = useState<Record<string, boolean>>({})
   const [catForm,   setCatForm]   = useState({ name: '', emoji: '🎯', desc: '' })
   const [catSaving, setCatSaving] = useState(false)
+  const [editCatId, setEditCatId] = useState<string | null>(null)
+  const [editCatForm, setEditCatForm] = useState({ name: '', emoji: '', desc: '' })
+  const [catEditSaving, setCatEditSaving] = useState(false)
   const [catError,  setCatError]  = useState('')
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000) }
@@ -125,6 +128,29 @@ export default function EditorPage() {
       setCatError(`فشل الحفظ: ${e?.message ?? 'خطأ في Firebase — تحقق من قواعد Firestore'}`)
     }
     setCatSaving(false)
+  }
+
+  const startEditCat = (cat: Category) => {
+    setEditCatId(cat.id)
+    setEditCatForm({ name: cat.name, emoji: cat.emoji, desc: cat.desc ?? '' })
+  }
+
+  const handleUpdateCat = async () => {
+    if (!editCatId || !editCatForm.name.trim() || !editCatForm.emoji.trim()) return
+    setCatEditSaving(true)
+    try {
+      await updateCustomCategory(editCatId, {
+        name: editCatForm.name.trim(),
+        emoji: editCatForm.emoji.trim(),
+        desc: editCatForm.desc.trim(),
+      })
+      await loadCustomCats()
+      setEditCatId(null)
+      showToast('✓ تم تحديث الفئة')
+    } catch (e: any) {
+      showToast(`فشل التحديث: ${e?.message ?? ''}`, 'err')
+    }
+    setCatEditSaving(false)
   }
 
   const handleDeleteCat = async (catId: string) => {

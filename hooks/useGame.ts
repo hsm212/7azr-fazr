@@ -254,6 +254,10 @@ export async function fetchCustomCategories(): Promise<Category[]> {
   } catch { return [] }
 }
 
+export async function updateCustomCategory(id: string, data: { name: string; emoji: string; desc: string }): Promise<void> {
+  await updateDoc(doc(getDb(), 'categories', id), data)
+}
+
 export async function deleteCustomCategory(id: string): Promise<void> {
   await deleteDoc(doc(getDb(), 'categories', id))
 }
